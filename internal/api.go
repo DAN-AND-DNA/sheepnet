@@ -1,6 +1,9 @@
 package internal
 
-import "net"
+import (
+	"bytes"
+	"net"
+)
 
 // Logger 外部日志，需要外部保证并发安全
 type Logger interface {
@@ -18,6 +21,8 @@ type ConnWrapper interface {
 	GetError() error
 	Send(msg []byte) error
 	Stop()
+	AllocFastMsg() *bytes.Buffer
+	SendFast(msg *bytes.Buffer) error
 }
 
 type ServerWrapper interface {

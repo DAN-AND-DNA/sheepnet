@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -20,13 +21,15 @@ type Connection struct {
 	connId             uint64
 	ctx                context.Context
 	cancel             context.CancelFunc
-	logger             Logger      // 外部logger
-	server             *Server     // 从属的server
-	sendChan           chan []byte // 发送消息队列
-	maxPendingMessages uint32      // 最大阻塞未发消息
+	logger             Logger             // 外部logger
+	server             *Server            // 从属的server
+	sendChan           chan []byte        // 发送消息队列
+	sendChanFast       chan *bytes.Buffer // 发送消息队列
+	maxPendingMessages uint32             // 最大阻塞未发消息
 	router             Router
 	err                error
 	errMutex           sync.Mutex
+	sendBytesPool      *sync.Pool
 	sync.RWMutex
 }
 
@@ -71,6 +74,8 @@ func NewConnection(connId uint64, conn net.Conn, s *Server) *Connection {
 	c.maxPendingMessages = s.config.MaxPendingMessages
 	c.router = s.router
 	c.sendChan = make(chan []byte, 1000)
+	c.sendChanFast = make(chan *bytes.Buffer, 1000)
+	c.sendBytesPool = s.sendBytesPool
 
 	return c
 }
@@ -152,6 +157,11 @@ func (c *Connection) finalizer() {
 	// 关闭发送管道
 	if c.sendChan != nil {
 		close(c.sendChan)
+	}
+
+	// 关闭发送管道
+	if c.sendChanFast != nil {
+		close(c.sendChanFast)
 	}
 }
 
@@ -250,6 +260,25 @@ func (c *Connection) loopWrite() {
 					return
 				}
 			}
+		case msg, ok := <-c.sendChanFast:
+			if !ok {
+				// chan 提前被关闭
+				break
+			}
+
+			// 发送
+			_, err := c.conn.Write(msg.Bytes())
+			msg.Reset()
+			c.sendBytesPool.Put(msg)
+			if err != nil {
+				c.SetError(err)
+				if c.logger != nil {
+					err = fmt.Errorf("connection loop write error: %v", err)
+					c.logger.ERR(c.err.Error())
+					return
+				}
+			}
+
 		}
 	}
 }
@@ -274,6 +303,34 @@ func (c *Connection) Send(msg []byte) error {
 		c.SetError(err)
 		return err
 	case c.sendChan <- msg:
+		return nil
+	}
+}
+
+func (c *Connection) AllocFastMsg() *bytes.Buffer {
+	return c.sendBytesPool.Get().(*bytes.Buffer)
+}
+
+func (c *Connection) SendFast(msg *bytes.Buffer) error {
+	if c == nil {
+		return nil
+	}
+
+	c.RLock()
+	defer c.RUnlock()
+	if c.isClosed {
+		return nil
+	}
+
+	waitTimer := time.NewTimer(7 * time.Millisecond)
+	defer waitTimer.Stop()
+
+	select {
+	case <-waitTimer.C:
+		err := fmt.Errorf("connection send msg timeout")
+		c.SetError(err)
+		return err
+	case c.sendChanFast <- msg:
 		return nil
 	}
 }

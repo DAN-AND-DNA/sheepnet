@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -31,6 +32,9 @@ type Server struct {
 
 	// 路由
 	router Router
+
+	// 全局池
+	sendBytesPool *sync.Pool
 }
 
 func NewServer(config Config, opts ...Option) *Server {
@@ -44,6 +48,12 @@ func NewServer(config Config, opts ...Option) *Server {
 	}
 
 	s.ctx, s.cancel = context.WithCancel(context.Background())
+
+	s.sendBytesPool = &sync.Pool{
+		New: func() any {
+			return new(bytes.Buffer)
+		},
+	}
 
 	return s
 }
