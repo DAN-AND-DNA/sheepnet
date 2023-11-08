@@ -42,7 +42,7 @@ type Message struct {
 	Body []byte
 }
 
-func (r *Router) OnNewConnection(c sheepnet.ConnWrapper) error {
+func (r *Router) OnMessage(c sheepnet.ConnWrapper) error {
 	if c == nil {
 		return nil
 	}

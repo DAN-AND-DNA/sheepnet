@@ -9,7 +9,7 @@ type Logger interface {
 }
 
 type Router interface {
-	OnNewConnection(ConnWrapper) error
+	OnMessage(ConnWrapper) error
 }
 
 type ConnWrapper interface {

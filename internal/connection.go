@@ -181,7 +181,7 @@ func (c *Connection) loopRead() {
 		default:
 			if c.router != nil {
 				// 通知路由有新连接
-				err := c.router.OnNewConnection(c)
+				err := c.router.OnMessage(c)
 				if err != nil {
 					if c.logger != nil {
 						c.logger.ERR(fmt.Sprintf("connection call router OnNewConnection error: %v", err))
