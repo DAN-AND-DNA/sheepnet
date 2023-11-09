@@ -29,6 +29,10 @@ func main() {
 		return nil
 	})
 
+	server.HookOnStop(func(conn sheepnet.ConnWrapper) {
+		log.Println("conn stop")
+	})
+
 	err := server.Run()
 	if err != nil {
 		logger.ERR(err.Error())

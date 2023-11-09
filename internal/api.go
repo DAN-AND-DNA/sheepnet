@@ -32,4 +32,5 @@ type ServerWrapper interface {
 	Stop()
 	HookOnMessage(func(ConnWrapper) error)
 	HookOnConnected(func(ConnWrapper) error)
+	HookOnStop(hooker func(conn ConnWrapper))
 }

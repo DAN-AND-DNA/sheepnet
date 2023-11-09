@@ -38,7 +38,8 @@ type Server struct {
 
 	// 钩子
 	onConnected func(ConnWrapper) error // 刚连接上钩子
-	onMessage   func(ConnWrapper) error // 刚连接上钩子
+	onMessage   func(ConnWrapper) error // 刚消息钩子
+	onStop      func(ConnWrapper)       // 刚关闭钩子
 }
 
 func NewServer(config Config, opts ...Option) *Server {
@@ -61,6 +62,7 @@ func NewServer(config Config, opts ...Option) *Server {
 
 	s.onConnected = nil
 	s.onMessage = nil
+	s.onStop = nil
 
 	return s
 }
@@ -219,4 +221,12 @@ func (s *Server) HookOnMessage(hooker func(conn ConnWrapper) error) {
 	}
 
 	s.onMessage = hooker
+}
+
+func (s *Server) HookOnStop(hooker func(conn ConnWrapper)) {
+	if s == nil {
+		return
+	}
+
+	s.onStop = hooker
 }

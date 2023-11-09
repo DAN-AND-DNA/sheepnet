@@ -30,6 +30,7 @@ type Connection struct {
 	sendBytesPool      *sync.Pool
 	onConnected        func(ConnWrapper) error // 刚连接上钩子
 	onMessage          func(ConnWrapper) error // 刚连接上钩子
+	onStop             func(ConnWrapper)
 
 	Ctx sync.Map
 	sync.RWMutex
@@ -76,6 +77,7 @@ func NewConnection(connId uint64, conn net.Conn, s *Server) *Connection {
 	c.maxPendingMessages = s.config.MaxPendingMessages
 	c.onMessage = s.onMessage
 	c.onConnected = s.onConnected
+	c.onStop = s.onStop
 	c.sendChan = make(chan []byte, 1000)
 	c.sendChanFast = make(chan *bytes.Buffer, 1000)
 	c.sendBytesPool = s.sendBytesPool
@@ -139,6 +141,10 @@ func (c *Connection) Stop() {
 func (c *Connection) finalizer() {
 	if c == nil {
 		return
+	}
+
+	if c.onStop != nil {
+		c.onStop(c)
 	}
 
 	c.Lock()
@@ -382,6 +388,14 @@ func (c *Connection) HookOnMessage(hooker func(conn ConnWrapper) error) {
 	}
 
 	c.onMessage = hooker
+}
+
+func (c *Connection) HookOnStop(hooker func(conn ConnWrapper)) {
+	if c == nil {
+		return
+	}
+
+	c.onStop = hooker
 }
 
 func (c *Connection) InjectCtx(key string, value any) {
