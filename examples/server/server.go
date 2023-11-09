@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"github.com/dan-and-dna/sheepnet"
+	"log"
 	"os/signal"
 	"syscall"
 )
@@ -23,7 +24,11 @@ func main() {
 	logger := &r.Logger
 
 	server := sheepnet.NewServer(config, sheepnet.WithLogger(logger))
-	server.SetRouter(r)
+	server.HookOnConnected(func(conn sheepnet.ConnWrapper) error {
+		log.Println("new conn")
+		return nil
+	})
+
 	err := server.Run()
 	if err != nil {
 		logger.ERR(err.Error())

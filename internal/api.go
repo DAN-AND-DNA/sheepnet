@@ -23,10 +23,13 @@ type ConnWrapper interface {
 	Stop()
 	AllocFastMsg() *bytes.Buffer
 	SendFast(msg *bytes.Buffer) error
+	InjectCtx(key string, value any)
+	FetchCtx(key string) any
 }
 
 type ServerWrapper interface {
-	SetRouter(router Router)
 	Run() error
 	Stop()
+	HookOnMessage(func(ConnWrapper) error)
+	HookOnConnected(func(ConnWrapper) error)
 }

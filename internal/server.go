@@ -35,6 +35,10 @@ type Server struct {
 
 	// 全局池
 	sendBytesPool *sync.Pool
+
+	// 钩子
+	onConnected func(ConnWrapper) error // 刚连接上钩子
+	onMessage   func(ConnWrapper) error // 刚连接上钩子
 }
 
 func NewServer(config Config, opts ...Option) *Server {
@@ -55,11 +59,10 @@ func NewServer(config Config, opts ...Option) *Server {
 		},
 	}
 
-	return s
-}
+	s.onConnected = nil
+	s.onMessage = nil
 
-func (s *Server) SetRouter(router Router) {
-	s.router = router
+	return s
 }
 
 func (s *Server) Run() error {
@@ -144,6 +147,7 @@ func (s *Server) listenTcp4() error {
 				connId := s.connId.Add(1)
 
 				connWrapper := NewConnection(connId, conn, s)
+
 				if connWrapper != nil {
 					s.connections.Store(connId, connWrapper)
 					// 启动连接逻辑
@@ -199,4 +203,20 @@ func WithLogger(logger Logger) Option {
 	return func(server *Server) {
 		server.logger = logger
 	}
+}
+
+func (s *Server) HookOnConnected(hooker func(conn ConnWrapper) error) {
+	if s == nil {
+		return
+	}
+
+	s.onConnected = hooker
+}
+
+func (s *Server) HookOnMessage(hooker func(conn ConnWrapper) error) {
+	if s == nil {
+		return
+	}
+
+	s.onMessage = hooker
 }

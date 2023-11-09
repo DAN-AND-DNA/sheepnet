@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"net"
 	"sync"
 	"time"
@@ -26,10 +25,13 @@ type Connection struct {
 	sendChan           chan []byte        // 发送消息队列
 	sendChanFast       chan *bytes.Buffer // 发送消息队列
 	maxPendingMessages uint32             // 最大阻塞未发消息
-	router             Router
 	err                error
 	errMutex           sync.Mutex
 	sendBytesPool      *sync.Pool
+	onConnected        func(ConnWrapper) error // 刚连接上钩子
+	onMessage          func(ConnWrapper) error // 刚连接上钩子
+
+	Ctx sync.Map
 	sync.RWMutex
 }
 
@@ -72,7 +74,8 @@ func NewConnection(connId uint64, conn net.Conn, s *Server) *Connection {
 	c.logger = s.logger
 	c.server = s
 	c.maxPendingMessages = s.config.MaxPendingMessages
-	c.router = s.router
+	c.onMessage = s.onMessage
+	c.onConnected = s.onConnected
 	c.sendChan = make(chan []byte, 1000)
 	c.sendChanFast = make(chan *bytes.Buffer, 1000)
 	c.sendBytesPool = s.sendBytesPool
@@ -184,17 +187,30 @@ func (c *Connection) loopRead() {
 	defer c.server.wg.Done()
 	defer c.Stop()
 
+	if c.onConnected != nil {
+		err := c.onConnected(c)
+		if err != nil {
+			if c.logger != nil {
+				c.logger.ERR(fmt.Sprintf("connection onConnected error: %v", err))
+			}
+
+			// 保存错误方便回溯
+			c.SetError(err)
+			return
+		}
+	}
+
 	for {
 		select {
 		case <-c.ctx.Done():
 			return
 		default:
-			if c.router != nil {
+			if c.onMessage != nil {
 				// 通知路由有新连接
-				err := c.router.OnMessage(c)
+				err := c.onMessage(c)
 				if err != nil {
 					if c.logger != nil {
-						c.logger.ERR(fmt.Sprintf("connection call router OnNewConnection error: %v", err))
+						c.logger.ERR(fmt.Sprintf("connection onMessage error: %v", err))
 					}
 
 					// 保存错误方便回溯
@@ -336,12 +352,13 @@ func (c *Connection) SendFast(msg *bytes.Buffer) error {
 }
 
 func (c *Connection) defaultOnMessage() ([]byte, error) {
-	message, err := io.ReadAll(c.conn)
+	onceBuf := make([]byte, 30)
+	_, err := c.conn.Read(onceBuf)
 	if err != nil {
 		return nil, err
 	}
 
-	return message, nil
+	return onceBuf, nil
 }
 
 func (c *Connection) defaultDispatch(message []byte) {
@@ -349,4 +366,41 @@ func (c *Connection) defaultDispatch(message []byte) {
 	if c.logger != nil {
 		c.logger.INFO(fmt.Sprintf("connection defaultOnNewConnection read %d bytes from xxx", len(message)))
 	}
+}
+
+func (c *Connection) HookOnConnected(hooker func(conn ConnWrapper) error) {
+	if c == nil {
+		return
+	}
+
+	c.onConnected = hooker
+}
+
+func (c *Connection) HookOnMessage(hooker func(conn ConnWrapper) error) {
+	if c == nil {
+		return
+	}
+
+	c.onMessage = hooker
+}
+
+func (c *Connection) InjectCtx(key string, value any) {
+	if c == nil {
+		return
+	}
+
+	c.Ctx.Store(key, value)
+}
+
+func (c *Connection) FetchCtx(key string) any {
+	if c == nil {
+		return nil
+	}
+
+	value, ok := c.Ctx.Load(key)
+	if !ok {
+		return nil
+	}
+
+	return value
 }
