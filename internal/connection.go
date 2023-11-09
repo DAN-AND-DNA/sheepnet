@@ -21,18 +21,18 @@ type Connection struct {
 	ctx                context.Context
 	cancel             context.CancelFunc
 	logger             Logger             // 外部logger
-	server             *Server            // 从属的server
 	sendChan           chan []byte        // 发送消息队列
 	sendChanFast       chan *bytes.Buffer // 发送消息队列
 	maxPendingMessages uint32             // 最大阻塞未发消息
 	err                error
 	errMutex           sync.Mutex
-	sendBytesPool      *sync.Pool
+	putBackBytesPool   *sync.Pool              // 外部回收池子
 	onConnected        func(ConnWrapper) error // 刚连接上钩子
 	onMessage          func(ConnWrapper) error // 刚连接上钩子
 	onStop             func(ConnWrapper)
-
-	Ctx sync.Map
+	Ctx                sync.Map
+	owner              Owner
+	wg                 *sync.WaitGroup
 	sync.RWMutex
 }
 
@@ -40,7 +40,6 @@ func (c *Connection) GetNetConn() net.Conn {
 	if c == nil {
 		return nil
 	}
-
 	return c.conn
 }
 
@@ -63,24 +62,25 @@ func (c *Connection) GetError() error {
 	return c.err
 }
 
-func NewConnection(connId uint64, conn net.Conn, s *Server) *Connection {
-	if s == nil {
-		return nil
+func NewConnection(connId uint64, conn net.Conn, owner Owner) *Connection {
+	if owner == nil {
+		panic("new connection has no owner")
 	}
 
 	c := new(Connection)
 	c.conn = conn
 	c.connId = connId
 	c.ctx, c.cancel = context.WithCancel(context.Background())
-	c.logger = s.logger
-	c.server = s
-	c.maxPendingMessages = s.config.MaxPendingMessages
-	c.onMessage = s.onMessage
-	c.onConnected = s.onConnected
-	c.onStop = s.onStop
+	c.logger = owner.GetLogger()
+	c.maxPendingMessages = owner.GetConfig().MaxPendingMessages
+	c.onMessage = owner.GetOnMessage()
+	c.onConnected = owner.GetOnConnected()
+	c.onStop = owner.GetOnStop()
 	c.sendChan = make(chan []byte, 1000)
 	c.sendChanFast = make(chan *bytes.Buffer, 1000)
-	c.sendBytesPool = s.sendBytesPool
+	c.putBackBytesPool = owner.GetBytesPool()
+	c.owner = owner
+	c.wg = owner.GetWaitGroup()
 
 	return c
 }
@@ -112,8 +112,8 @@ func (c *Connection) Run() {
 
 	// 清理资源
 	go func() {
-		c.server.wg.Add(1)
-		defer c.server.wg.Done()
+		c.wg.Add(1)
+		defer c.wg.Done()
 
 		select {
 		case <-c.ctx.Done():
@@ -156,7 +156,8 @@ func (c *Connection) finalizer() {
 	c.isClosed = true
 
 	// 取消注册conn到server
-	c.server.connections.Delete(c.connId)
+	//c.server.connections.Delete(c.connId)
+	c.owner.RemoveConnection(c.connId)
 
 	// 关闭连接，使连接读写操作退出阻塞
 	if c.conn != nil {
@@ -189,8 +190,8 @@ func (c *Connection) loopRead() {
 		}
 	}()
 
-	c.server.wg.Add(1)
-	defer c.server.wg.Done()
+	c.wg.Add(1)
+	defer c.wg.Done()
 	defer c.Stop()
 
 	if c.onConnected != nil {
@@ -259,8 +260,8 @@ func (c *Connection) loopWrite() {
 		}
 	}()
 
-	c.server.wg.Add(1)
-	defer c.server.wg.Done()
+	c.wg.Add(1)
+	defer c.wg.Done()
 
 	for {
 		select {
@@ -290,8 +291,10 @@ func (c *Connection) loopWrite() {
 
 			// 发送
 			_, err := c.conn.Write(msg.Bytes())
-			msg.Reset()
-			c.sendBytesPool.Put(msg)
+			if c.putBackBytesPool != nil {
+				msg.Reset()
+				c.putBackBytesPool.Put(msg)
+			}
 			if err != nil {
 				c.SetError(err)
 				if c.logger != nil {
@@ -329,11 +332,7 @@ func (c *Connection) Send(msg []byte) error {
 	}
 }
 
-func (c *Connection) AllocFastMsg() *bytes.Buffer {
-	return c.sendBytesPool.Get().(*bytes.Buffer)
-}
-
-func (c *Connection) SendFast(msg *bytes.Buffer) error {
+func (c *Connection) SendAndReuse(msg *bytes.Buffer) error {
 	if c == nil {
 		return nil
 	}

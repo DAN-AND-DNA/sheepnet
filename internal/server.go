@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -30,11 +29,8 @@ type Server struct {
 	connections sync.Map
 	wg          *sync.WaitGroup
 
-	// 路由
-	router Router
-
 	// 全局池
-	sendBytesPool *sync.Pool
+	bytesPool *sync.Pool // 外部
 
 	// 钩子
 	onConnected func(ConnWrapper) error // 刚连接上钩子
@@ -42,7 +38,7 @@ type Server struct {
 	onStop      func(ConnWrapper)       // 刚关闭钩子
 }
 
-func NewServer(config Config, opts ...Option) *Server {
+func NewServer(config Config, opts ...Option) ServerWrapper {
 	s := new(Server)
 	s.config = config
 	s.connId.Store(0)
@@ -53,12 +49,6 @@ func NewServer(config Config, opts ...Option) *Server {
 	}
 
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-
-	s.sendBytesPool = &sync.Pool{
-		New: func() any {
-			return new(bytes.Buffer)
-		},
-	}
 
 	s.onConnected = nil
 	s.onMessage = nil
@@ -199,14 +189,6 @@ func (s *Server) finalizer() {
 	})
 }
 
-type Option func(*Server)
-
-func WithLogger(logger Logger) Option {
-	return func(server *Server) {
-		server.logger = logger
-	}
-}
-
 func (s *Server) HookOnConnected(hooker func(conn ConnWrapper) error) {
 	if s == nil {
 		return
@@ -229,4 +211,75 @@ func (s *Server) HookOnStop(hooker func(conn ConnWrapper)) {
 	}
 
 	s.onStop = hooker
+}
+
+func (s *Server) GetLogger() Logger {
+	if s == nil {
+		return nil
+	}
+
+	return s.logger
+}
+
+func (s *Server) GetConfig() Config {
+	if s == nil {
+		return Config{}
+	}
+
+	return s.config
+}
+
+func (s *Server) GetOnMessage() func(ConnWrapper) error {
+	if s == nil {
+		return nil
+	}
+
+	return s.onMessage
+}
+
+func (s *Server) GetOnConnected() func(ConnWrapper) error {
+	if s == nil {
+		return nil
+	}
+
+	return s.onConnected
+}
+
+func (s *Server) GetOnStop() func(ConnWrapper) {
+	if s == nil {
+		return nil
+	}
+
+	return s.onStop
+}
+
+func (s *Server) GetBytesPool() *sync.Pool {
+	if s == nil {
+		return nil
+	}
+
+	return s.bytesPool
+}
+
+func (s *Server) SetBytesPool(bytesBufferPool *sync.Pool) {
+	s.bytesPool = bytesBufferPool
+}
+
+func (s *Server) GetWaitGroup() *sync.WaitGroup {
+	if s == nil {
+		return nil
+	}
+
+	return s.wg
+}
+
+func (s *Server) RemoveConnection(connId uint64) {
+	if s == nil {
+		return
+	}
+	s.connections.Delete(connId)
+}
+
+func (s *Server) SetLogger(logger Logger) {
+	s.logger = logger
 }

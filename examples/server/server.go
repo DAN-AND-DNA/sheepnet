@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"github.com/dan-and-dna/sheepnet"
 	"log"
 	"os/signal"
+	"sync"
 	"syscall"
 )
 
@@ -20,10 +22,15 @@ func main() {
 		},
 	}
 
-	r := &Router{}
-	logger := &r.Logger
+	logger := &DemoLogger{}
 
-	server := sheepnet.NewServer(config, sheepnet.WithLogger(logger))
+	pool := &sync.Pool{
+		New: func() any {
+			return new(bytes.Buffer)
+		},
+	}
+
+	server := sheepnet.NewServer(config, sheepnet.WithLogger(logger), sheepnet.WithBytesBufferPool(pool))
 	server.HookOnConnected(func(conn sheepnet.ConnWrapper) error {
 		log.Println("new conn")
 		return nil
@@ -31,6 +38,21 @@ func main() {
 
 	server.HookOnStop(func(conn sheepnet.ConnWrapper) {
 		log.Println("conn stop")
+	})
+
+	onceByte := make([]byte, 1024)
+	server.HookOnMessage(func(conn sheepnet.ConnWrapper) error {
+		log.Println("get message")
+		netConn := conn.GetNetConn()
+
+		n, err := netConn.Read(onceByte)
+		if err != nil {
+			return err
+		}
+
+		log.Println(string(onceByte[:n]))
+
+		return nil
 	})
 
 	err := server.Run()
