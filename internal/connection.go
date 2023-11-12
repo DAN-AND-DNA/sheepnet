@@ -3,7 +3,9 @@ package internal
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"sync"
 	"time"
@@ -14,6 +16,14 @@ var (
 	_ ConnWrapper = (*Connection)(nil)
 )
 
+func init() {
+	go func() {
+		for {
+			time.Sleep(1 * time.Second)
+		}
+	}()
+}
+
 type Connection struct {
 	isClosed           bool
 	conn               net.Conn
@@ -22,7 +32,7 @@ type Connection struct {
 	cancel             context.CancelFunc
 	logger             Logger             // 外部logger
 	sendChan           chan []byte        // 发送消息队列
-	sendChanFast       chan *bytes.Buffer // 发送消息队列
+	sendChanReused     chan *bytes.Buffer // 发送消息队列
 	maxPendingMessages uint32             // 最大阻塞未发消息
 	err                error
 	errMutex           sync.Mutex
@@ -76,8 +86,8 @@ func NewConnection(connId uint64, conn net.Conn, owner Owner) *Connection {
 	c.onMessage = owner.GetOnMessage()
 	c.onConnected = owner.GetOnConnected()
 	c.onStop = owner.GetOnStop()
-	c.sendChan = make(chan []byte, 1000)
-	c.sendChanFast = make(chan *bytes.Buffer, 1000)
+	c.sendChan = make(chan []byte, c.maxPendingMessages)
+	c.sendChanReused = make(chan *bytes.Buffer, c.maxPendingMessages)
 	c.putBackBytesPool = owner.GetBytesPool()
 	c.owner = owner
 	c.wg = owner.GetWaitGroup()
@@ -156,7 +166,6 @@ func (c *Connection) finalizer() {
 	c.isClosed = true
 
 	// 取消注册conn到server
-	//c.server.connections.Delete(c.connId)
 	c.owner.RemoveConnection(c.connId)
 
 	// 关闭连接，使连接读写操作退出阻塞
@@ -170,8 +179,8 @@ func (c *Connection) finalizer() {
 	}
 
 	// 关闭发送管道
-	if c.sendChanFast != nil {
-		close(c.sendChanFast)
+	if c.sendChanReused != nil {
+		close(c.sendChanReused)
 	}
 }
 
@@ -189,7 +198,7 @@ func (c *Connection) loopRead() {
 			}
 		}
 	}()
-
+	
 	c.wg.Add(1)
 	defer c.wg.Done()
 	defer c.Stop()
@@ -217,7 +226,9 @@ func (c *Connection) loopRead() {
 				err := c.onMessage(c)
 				if err != nil {
 					if c.logger != nil {
-						c.logger.ERR(fmt.Sprintf("connection onMessage error: %v", err))
+						if !errors.Is(err, io.EOF) {
+							c.logger.ERR(fmt.Sprintf("connection onMessage error: %v", err))
+						}
 					}
 
 					// 保存错误方便回溯
@@ -229,7 +240,9 @@ func (c *Connection) loopRead() {
 				message, err := c.defaultOnMessage()
 				if err != nil {
 					if c.logger != nil {
-						c.logger.ERR(fmt.Sprintf("connection call defaultOnNewConnection error: %v", err))
+						if !errors.Is(err, net.ErrClosed) {
+							c.logger.ERR(fmt.Sprintf("connection call defaultOnNewConnection error: %v", err))
+						}
 					}
 
 					// 保存错误方便回溯
@@ -270,7 +283,7 @@ func (c *Connection) loopWrite() {
 		case msg, ok := <-c.sendChan:
 			if !ok {
 				// chan 提前被关闭
-				break
+				return
 			}
 
 			// 发送
@@ -283,10 +296,10 @@ func (c *Connection) loopWrite() {
 					return
 				}
 			}
-		case msg, ok := <-c.sendChanFast:
+		case msg, ok := <-c.sendChanReused:
 			if !ok {
 				// chan 提前被关闭
-				break
+				return
 			}
 
 			// 发送
@@ -308,7 +321,7 @@ func (c *Connection) loopWrite() {
 	}
 }
 
-func (c *Connection) Send(msg []byte) error {
+func (c *Connection) Send1(msg []byte) error {
 	if c == nil {
 		return nil
 	}
@@ -332,7 +345,7 @@ func (c *Connection) Send(msg []byte) error {
 	}
 }
 
-func (c *Connection) SendAndReuse(msg *bytes.Buffer) error {
+func (c *Connection) Send2(msg *bytes.Buffer, reused bool) error {
 	if c == nil {
 		return nil
 	}
@@ -351,7 +364,7 @@ func (c *Connection) SendAndReuse(msg *bytes.Buffer) error {
 		err := fmt.Errorf("connection send msg timeout")
 		c.SetError(err)
 		return err
-	case c.sendChanFast <- msg:
+	case c.sendChanReused <- msg:
 		return nil
 	}
 }

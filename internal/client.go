@@ -11,6 +11,8 @@ type Client struct {
 	// 配置
 	config Config
 
+	address string
+
 	wg         *sync.WaitGroup
 	ctx        context.Context
 	cancel     context.CancelFunc
@@ -26,31 +28,71 @@ type Client struct {
 	sync.RWMutex
 }
 
-func NewClient(config Config, opts ...Option) ClientWrapper {
-	clientSide := &Client{}
+func NewClient(maxPendingMessages uint32, opts ...Option) ClientWrapper {
+	client := &Client{}
 
-	clientSide.config = config
-	clientSide.wg = &sync.WaitGroup{}
-	clientSide.ctx, clientSide.cancel = context.WithCancel(context.Background())
+	config := Config{
+		MaxPendingMessages: maxPendingMessages,
+	}
 
-	return clientSide
+	client.config = config
+	client.wg = &sync.WaitGroup{}
+	client.ctx, client.cancel = context.WithCancel(context.Background())
+
+	for _, opt := range opts {
+		opt(client)
+	}
+
+	return client
 }
 
 func (client *Client) Dial(address string) error {
-	conn, err := net.Dial("tcp4", address)
+	if client == nil {
+		return nil
+	}
+
+	client.address = address
+	conn, err := net.Dial("tcp4", client.address)
 	if err != nil {
 		return err
 	}
 
 	client.connection = NewConnection(37, conn, client)
-	client.connection.Run()
+
+	if client.connection != nil {
+		client.connection.Run()
+	}
+
+	go func() {
+		select {
+		case <-client.ctx.Done():
+			if client.logger != nil {
+				client.logger.INFO("start stop client conn")
+			}
+
+			client.finalizer()
+		}
+	}()
+
 	return nil
 }
 
-func (client *Client) Stop() {
+func (client *Client) finalizer() {
+	if client == nil {
+		return
+	}
+
 	if client.connection != nil {
 		client.connection.Stop()
 	}
+}
+
+func (client *Client) Stop() {
+	if client == nil {
+		return
+	}
+
+	client.cancel()
 }
 
 func (client *Client) HookOnConnected(hooker func(conn ConnWrapper) error) {
@@ -77,12 +119,12 @@ func (client *Client) HookOnStop(hooker func(conn ConnWrapper)) {
 	client.onStop = hooker
 }
 
-func (client *Client) SendAndReuse(message *bytes.Buffer) error {
-	return client.connection.SendAndReuse(message)
+func (client *Client) Send1(message []byte) error {
+	return client.connection.Send1(message)
 }
 
-func (client *Client) Send(message []byte) error {
-	return client.connection.Send(message)
+func (client *Client) Send2(message *bytes.Buffer, reuse bool) error {
+	return client.connection.Send2(message, reuse)
 }
 
 func (client *Client) GetLogger() Logger {

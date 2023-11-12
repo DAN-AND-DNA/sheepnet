@@ -16,8 +16,7 @@ func main() {
 	}
 	logger := &DemoLogger{}
 
-	client := sheepnet.NewClient(sheepnet.Config{}, sheepnet.WithLogger(logger))
-	defer client.Stop()
+	client := sheepnet.NewClient(1024, sheepnet.WithLogger(logger), sheepnet.WithBytesBufferPool(pool))
 
 	client.HookOnConnected(func(conn sheepnet.ConnWrapper) error {
 		log.Println("connected")
@@ -30,11 +29,14 @@ func main() {
 	}
 
 	message := pool.Get().(*bytes.Buffer)
+	message.Reset()
 	message.WriteString("DDD")
-	err = client.SendAndReuse(message)
+	err = client.Send2(message, true)
 	if err != nil {
 		panic(err)
 	}
 
-	time.Sleep(10 * time.Second)
+	time.Sleep(3 * time.Second)
+	client.Stop()
+	time.Sleep(1 * time.Second)
 }

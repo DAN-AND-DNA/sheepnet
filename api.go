@@ -34,6 +34,6 @@ func NewServer(config Config, opts ...Option) ServerWrapper {
 	return internal.NewServer(config, opts...)
 }
 
-func NewClient(config Config, opts ...Option) ClientWrapper {
-	return internal.NewClient(config, opts...)
+func NewClient(maxPendingMessages uint32, opts ...Option) ClientWrapper {
+	return internal.NewClient(maxPendingMessages, opts...)
 }

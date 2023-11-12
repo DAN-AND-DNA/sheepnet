@@ -29,7 +29,7 @@ func parseServerConfig(config Config) (Config, error) {
 
 		// 最大连接数
 		if tcp4Config.MaxConnections <= 0 {
-			tcp4Config.MaxConnections = 50000
+			tcp4Config.MaxConnections = 20000
 		}
 
 		tcp4Configs[index] = tcp4Config

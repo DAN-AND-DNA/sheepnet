@@ -36,6 +36,7 @@ type Server struct {
 	onConnected func(ConnWrapper) error // 刚连接上钩子
 	onMessage   func(ConnWrapper) error // 刚消息钩子
 	onStop      func(ConnWrapper)       // 刚关闭钩子
+
 }
 
 func NewServer(config Config, opts ...Option) ServerWrapper {

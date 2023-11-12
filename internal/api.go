@@ -20,11 +20,11 @@ type ConnWrapper interface {
 	GetNetConn() net.Conn
 	SetError(error)
 	GetError() error
-	Send(msg []byte) error
+	Send1(msg []byte) error
+	Send2(msg *bytes.Buffer, reused bool) error
 	Stop()
-	SendAndReuse(msg *bytes.Buffer) error
-	InjectCtx(key string, value any)
-	FetchCtx(key string) any
+	InjectCtx(string, any)
+	FetchCtx(string) any
 }
 
 type ServerWrapper interface {
@@ -32,7 +32,7 @@ type ServerWrapper interface {
 	Stop()
 	HookOnMessage(func(ConnWrapper) error)
 	HookOnConnected(func(ConnWrapper) error)
-	HookOnStop(hooker func(conn ConnWrapper))
+	HookOnStop(func(ConnWrapper))
 }
 
 type ClientWrapper interface {
@@ -40,9 +40,9 @@ type ClientWrapper interface {
 	Stop()
 	HookOnMessage(func(ConnWrapper) error)
 	HookOnConnected(func(ConnWrapper) error)
-	HookOnStop(hooker func(conn ConnWrapper))
-	SendAndReuse(msg *bytes.Buffer) error
-	Send(message []byte) error
+	HookOnStop(func(ConnWrapper))
+	Send1(msg []byte) error
+	Send2(msg *bytes.Buffer, reused bool) error
 }
 
 type Owner interface {
