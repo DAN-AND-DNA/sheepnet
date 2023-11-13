@@ -77,6 +77,10 @@ func (client *Client) Dial(address string) error {
 	return nil
 }
 
+func (client *Client) GetConn() ConnWrapper {
+	return client.connection
+}
+
 func (client *Client) finalizer() {
 	if client == nil {
 		return

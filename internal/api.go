@@ -43,6 +43,7 @@ type ClientWrapper interface {
 	HookOnStop(func(ConnWrapper))
 	Send1(msg []byte) error
 	Send2(msg *bytes.Buffer, reused bool) error
+	GetConn() ConnWrapper
 }
 
 type Owner interface {
