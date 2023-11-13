@@ -198,7 +198,7 @@ func (c *Connection) loopRead() {
 			}
 		}
 	}()
-	
+
 	c.wg.Add(1)
 	defer c.wg.Done()
 	defer c.Stop()
@@ -332,8 +332,11 @@ func (c *Connection) Send1(msg []byte) error {
 		return nil
 	}
 
-	waitTimer := time.NewTimer(7 * time.Millisecond)
+	waitTimer := tickerPool.Get().(*time.Ticker)
 	defer waitTimer.Stop()
+	defer tickerPool.Put(waitTimer)
+
+	waitTimer.Reset(7 * time.Millisecond)
 
 	select {
 	case <-waitTimer.C:
@@ -356,8 +359,10 @@ func (c *Connection) Send2(msg *bytes.Buffer, reused bool) error {
 		return nil
 	}
 
-	waitTimer := time.NewTimer(7 * time.Millisecond)
+	waitTimer := tickerPool.Get().(*time.Ticker)
 	defer waitTimer.Stop()
+	defer tickerPool.Put(waitTimer)
+	waitTimer.Reset(7 * time.Millisecond)
 
 	select {
 	case <-waitTimer.C:
